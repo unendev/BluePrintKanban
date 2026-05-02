@@ -1,71 +1,126 @@
 /**
- * Kanban Store - Blueprint-inspired, pure localStorage.
- * Data model: projects[] → boards[] → tasks[] → timers[] (独立挂载)
+ * Blueprint Store - Infinite canvas with free nodes
+ * Pure localStorage, no cloud.
  */
 
-// ── Types ──────────────────────────────────────────────────
+export type NodeType = 'task' | 'timer' | 'note';
 
-export interface KanbanTimer {
-  id: string;
-  taskId: string;
-  isRunning: boolean;
-  totalSeconds: number;
-  startedAt: string | null;
-  createdAt: string;
-}
-
-export interface KanbanTask {
+export interface BlueprintNode {
   id: string;
   projectId: string;
-  boardId: string;
+  type: NodeType;
   title: string;
-  completed: boolean;
-  order: number;
-  timerId: string | null; // 挂载的计时器引用（可选）
+  content?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  completed?: boolean;
+  timerData?: {
+    isRunning: boolean;
+    totalSeconds: number;
+    startedAt: string | null;
+  };
+  connections: string[]; // ids of target nodes this node connects TO
   createdAt: string;
 }
 
-export interface KanbanBoard {
-  id: string;
-  projectId: string;
-  name: string;
-  order: number;
-  color: string;
-}
-
-export interface KanbanProject {
+export interface BlueprintProject {
   id: string;
   name: string;
   color: string;
   order: number;
+  camera: {
+    x: number;
+    y: number;
+    zoom: number;
+  };
+  showGrid: boolean;
 }
 
-// ── Storage ────────────────────────────────────────────────
-
-const STORAGE_KEY = 'kanban-data-v2';
+const STORAGE_KEY = 'blueprint-data-v3';
 
 function generateId(prefix = 'id'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-interface StoreData {
-  projects: KanbanProject[];
-  boards: KanbanBoard[];
-  tasks: KanbanTask[];
-  timers: KanbanTimer[];
-}
+const DEFAULT_SIZES: Record<NodeType, { width: number; height: number }> = {
+  task: { width: 240, height: 64 },
+  timer: { width: 160, height: 44 },
+  note: { width: 200, height: 120 },
+};
 
-function initData(): StoreData {
-  const inbox: KanbanProject = { id: 'proj-inbox', name: 'Inbox', color: '#888888', order: 0 };
-  const boards: KanbanBoard[] = [
-    { id: 'board-todo', projectId: inbox.id, name: 'To Do', order: 0, color: '#888888' },
-    { id: 'board-doing', projectId: inbox.id, name: 'In Progress', order: 1, color: '#4488ff' },
-    { id: 'board-done', projectId: inbox.id, name: 'Done', order: 2, color: '#44aa44' },
+const DEFAULT_COLORS: Record<NodeType, string> = {
+  task: '#3b82f6',
+  timer: '#f59e0b',
+  note: '#22c55e',
+};
+
+function initData(): { projects: BlueprintProject[]; nodes: BlueprintNode[] } {
+  const proj: BlueprintProject = {
+    id: 'proj-inbox',
+    name: 'Inbox',
+    color: '#888888',
+    order: 0,
+    camera: { x: 0, y: 0, zoom: 1 },
+    showGrid: true,
+  };
+  const now = new Date().toISOString();
+  const nodes: BlueprintNode[] = [
+    {
+      id: 'node-1',
+      projectId: proj.id,
+      type: 'task',
+      title: 'Welcome to Blueprint!',
+      x: 100, y: 100,
+      width: 260, height: 64,
+      color: '#3b82f6',
+      completed: false,
+      connections: [],
+      createdAt: now,
+    },
+    {
+      id: 'node-2',
+      projectId: proj.id,
+      type: 'task',
+      title: 'Right-click canvas to add nodes',
+      x: 100, y: 200,
+      width: 280, height: 64,
+      color: '#3b82f6',
+      completed: false,
+      connections: [],
+      createdAt: now,
+    },
+    {
+      id: 'node-3',
+      projectId: proj.id,
+      type: 'task',
+      title: 'Drag nodes to organize your thoughts',
+      x: 400, y: 100,
+      width: 300, height: 64,
+      color: '#3b82f6',
+      completed: false,
+      connections: [],
+      createdAt: now,
+    },
+    {
+      id: 'node-4',
+      projectId: proj.id,
+      type: 'timer',
+      title: 'Focus Timer',
+      x: 440, y: 200,
+      width: 160, height: 44,
+      color: '#f59e0b',
+      timerData: { isRunning: false, totalSeconds: 0, startedAt: null },
+      connections: ['node-1'],
+      createdAt: now,
+    },
   ];
-  return { projects: [inbox], boards, tasks: [], timers: [] };
+  return { projects: [proj], nodes };
 }
 
-function read(): StoreData {
+function read(): { projects: BlueprintProject[]; nodes: BlueprintNode[] } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
@@ -75,256 +130,186 @@ function read(): StoreData {
   return data;
 }
 
-function write(data: StoreData) {
+function write(data: { projects: BlueprintProject[]; nodes: BlueprintNode[] }) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
 // ── Projects ───────────────────────────────────────────────
 
-export function getProjects(): KanbanProject[] {
+export function getProjects(): BlueprintProject[] {
   return read().projects.sort((a, b) => a.order - b.order);
 }
 
-export function createProject(name: string, color = '#888888'): KanbanProject {
+export function createProject(name: string, color = '#888888'): BlueprintProject {
   const data = read();
-  const proj: KanbanProject = {
+  const proj: BlueprintProject = {
     id: generateId('proj'),
     name: name || 'New Project',
     color,
     order: data.projects.length,
+    camera: { x: 0, y: 0, zoom: 1 },
+    showGrid: true,
   };
   data.projects.push(proj);
-  const defaultBoards = ['To Do', 'In Progress', 'Done'];
-  defaultBoards.forEach((n, i) => {
-    data.boards.push({
-      id: generateId('board'),
-      projectId: proj.id,
-      name: n,
-      order: i,
-      color: i === 0 ? '#888888' : i === 1 ? '#4488ff' : '#44aa44',
-    });
-  });
   write(data);
   return proj;
-}
-
-export function updateProject(id: string, updates: Partial<KanbanProject>) {
-  const data = read();
-  const idx = data.projects.findIndex(p => p.id === id);
-  if (idx === -1) return null;
-  data.projects[idx] = { ...data.projects[idx], ...updates };
-  write(data);
-  return data.projects[idx];
 }
 
 export function deleteProject(id: string) {
   const data = read();
   data.projects = data.projects.filter(p => p.id !== id);
-  data.boards = data.boards.filter(b => b.projectId !== id);
-  const tasksToDelete = data.tasks.filter(t => t.projectId === id);
-  const timerIdsToDelete = tasksToDelete.map(t => t.timerId).filter(Boolean) as string[];
-  data.timers = data.timers.filter(tm => !timerIdsToDelete.includes(tm.id));
-  data.tasks = data.tasks.filter(t => t.projectId !== id);
+  data.nodes = data.nodes.filter(n => n.projectId !== id);
   write(data);
   return true;
 }
 
-// ── Boards ─────────────────────────────────────────────────
-
-export function getBoards(projectId?: string): KanbanBoard[] {
-  let boards = read().boards;
-  if (projectId) boards = boards.filter(b => b.projectId === projectId);
-  return boards.sort((a, b) => a.order - b.order);
-}
-
-export function createBoard(projectId: string, name: string, color = '#888888'): KanbanBoard {
+export function updateProjectCamera(id: string, camera: Partial<BlueprintProject['camera']>) {
   const data = read();
-  const board: KanbanBoard = {
-    id: generateId('board'),
-    projectId,
-    name: name || 'New Board',
-    order: data.boards.filter(b => b.projectId === projectId).length,
-    color,
-  };
-  data.boards.push(board);
-  write(data);
-  return board;
-}
-
-export function updateBoard(id: string, updates: Partial<KanbanBoard>) {
-  const data = read();
-  const idx = data.boards.findIndex(b => b.id === id);
+  const idx = data.projects.findIndex(p => p.id === id);
   if (idx === -1) return null;
-  data.boards[idx] = { ...data.boards[idx], ...updates };
+  data.projects[idx].camera = { ...data.projects[idx].camera, ...camera };
   write(data);
-  return data.boards[idx];
+  return data.projects[idx];
 }
 
-export function deleteBoard(id: string) {
+export function toggleProjectGrid(id: string) {
   const data = read();
-  const board = data.boards.find(b => b.id === id);
-  if (!board) return false;
-  data.boards = data.boards.filter(b => b.id !== id);
-  const first = data.boards.find(b => b.projectId === board.projectId);
-  if (first) {
-    data.tasks.forEach(t => { if (t.boardId === id) t.boardId = first.id; });
-  }
+  const idx = data.projects.findIndex(p => p.id === id);
+  if (idx === -1) return null;
+  data.projects[idx].showGrid = !data.projects[idx].showGrid;
   write(data);
-  return true;
+  return data.projects[idx];
 }
 
-// ── Tasks ──────────────────────────────────────────────────
+// ── Nodes ──────────────────────────────────────────────────
 
-export function getTasks(filter?: { projectId?: string; boardId?: string }): KanbanTask[] {
-  let tasks = read().tasks;
-  if (filter?.projectId) tasks = tasks.filter(t => t.projectId === filter.projectId);
-  if (filter?.boardId) tasks = tasks.filter(t => t.boardId === filter.boardId);
-  return tasks.sort((a, b) => a.order - b.order);
+export function getNodes(projectId?: string): BlueprintNode[] {
+  let nodes = read().nodes;
+  if (projectId) nodes = nodes.filter(n => n.projectId === projectId);
+  return nodes;
 }
 
-export function createTask(projectId: string, boardId: string, title: string): KanbanTask {
+export function createNode(
+  projectId: string,
+  type: NodeType,
+  title: string,
+  x: number,
+  y: number,
+  color?: string
+): BlueprintNode {
   const data = read();
-  const task: KanbanTask = {
-    id: generateId('task'),
+  const size = DEFAULT_SIZES[type];
+  const node: BlueprintNode = {
+    id: generateId('node'),
     projectId,
-    boardId,
-    title: title || 'New Task',
-    completed: false,
-    order: data.tasks.filter(t => t.boardId === boardId).length,
-    timerId: null,
+    type,
+    title: title || `New ${type}`,
+    x, y,
+    width: size.width,
+    height: size.height,
+    color: color || DEFAULT_COLORS[type],
+    connections: [],
     createdAt: new Date().toISOString(),
   };
-  data.tasks.push(task);
-  write(data);
-  return task;
-}
-
-export function updateTask(id: string, updates: Partial<KanbanTask>) {
-  const data = read();
-  const idx = data.tasks.findIndex(t => t.id === id);
-  if (idx === -1) return null;
-  data.tasks[idx] = { ...data.tasks[idx], ...updates };
-  write(data);
-  return data.tasks[idx];
-}
-
-export function deleteTask(id: string) {
-  const data = read();
-  const task = data.tasks.find(t => t.id === id);
-  if (task?.timerId) {
-    data.timers = data.timers.filter(tm => tm.id !== task.timerId);
+  if (type === 'task') node.completed = false;
+  if (type === 'timer') {
+    node.timerData = { isRunning: false, totalSeconds: 0, startedAt: null };
   }
-  data.tasks = data.tasks.filter(t => t.id !== id);
+  data.nodes.push(node);
+  write(data);
+  return node;
+}
+
+export function updateNode(id: string, updates: Partial<BlueprintNode>) {
+  const data = read();
+  const idx = data.nodes.findIndex(n => n.id === id);
+  if (idx === -1) return null;
+  data.nodes[idx] = { ...data.nodes[idx], ...updates };
+  write(data);
+  return data.nodes[idx];
+}
+
+export function deleteNode(id: string) {
+  const data = read();
+  data.nodes = data.nodes.filter(n => n.id !== id);
+  // Remove connections to deleted node
+  data.nodes.forEach(n => {
+    n.connections = n.connections.filter(c => c !== id);
+  });
   write(data);
   return true;
 }
 
-export function moveTask(taskId: string, targetBoardId: string, newOrder?: number) {
+// ── Connections ────────────────────────────────────────────
+
+export function connectNodes(fromId: string, toId: string): boolean {
   const data = read();
-  const task = data.tasks.find(t => t.id === taskId);
-  if (!task) return null;
-  task.boardId = targetBoardId;
-  if (typeof newOrder === 'number') task.order = newOrder;
-  const board = data.boards.find(b => b.id === targetBoardId);
-  if (board?.name.toLowerCase() === 'done') task.completed = true;
-  write(data);
-  return task;
-}
-
-// ── Timers (独立挂载) ──────────────────────────────────────
-
-export function getTimers(filter?: { taskId?: string }): KanbanTimer[] {
-  let timers = read().timers;
-  if (filter?.taskId) timers = timers.filter(tm => tm.taskId === filter.taskId);
-  return timers;
-}
-
-export function getTimerById(id: string): KanbanTimer | undefined {
-  return read().timers.find(tm => tm.id === id);
-}
-
-export function getTimerByTaskId(taskId: string): KanbanTimer | undefined {
-  return read().timers.find(tm => tm.taskId === taskId);
-}
-
-/** 为指定任务创建并挂载一个计时器 */
-export function attachTimer(taskId: string): KanbanTimer | null {
-  const data = read();
-  const task = data.tasks.find(t => t.id === taskId);
-  if (!task) return null;
-  if (task.timerId) return data.timers.find(tm => tm.id === task.timerId) || null;
-
-  const timer: KanbanTimer = {
-    id: generateId('timer'),
-    taskId,
-    isRunning: false,
-    totalSeconds: 0,
-    startedAt: null,
-    createdAt: new Date().toISOString(),
-  };
-  data.timers.push(timer);
-  task.timerId = timer.id;
-  write(data);
-  return timer;
-}
-
-/** 从任务上卸载并删除计时器 */
-export function detachTimer(taskId: string): boolean {
-  const data = read();
-  const task = data.tasks.find(t => t.id === taskId);
-  if (!task || !task.timerId) return false;
-  data.timers = data.timers.filter(tm => tm.id !== task.timerId);
-  task.timerId = null;
+  const from = data.nodes.find(n => n.id === fromId);
+  if (!from) return false;
+  if (from.connections.includes(toId)) return false;
+  from.connections.push(toId);
   write(data);
   return true;
 }
 
-export function startTimer(timerId: string): KanbanTimer | null {
+export function disconnectNodes(fromId: string, toId: string): boolean {
+  const data = read();
+  const from = data.nodes.find(n => n.id === fromId);
+  if (!from) return false;
+  from.connections = from.connections.filter(c => c !== toId);
+  write(data);
+  return true;
+}
+
+// ── Timer ──────────────────────────────────────────────────
+
+export function startTimer(nodeId: string): BlueprintNode | null {
   const data = read();
   const now = new Date().toISOString();
-  // 停止其他正在运行的计时器
-  data.timers.forEach(tm => {
-    if (tm.id !== timerId && tm.isRunning && tm.startedAt) {
-      const elapsed = Math.floor((Date.now() - new Date(tm.startedAt).getTime()) / 1000);
-      tm.totalSeconds += elapsed;
-      tm.isRunning = false;
-      tm.startedAt = null;
+  // Stop other running timers
+  data.nodes.forEach(n => {
+    if (n.id !== nodeId && n.timerData?.isRunning && n.timerData.startedAt) {
+      const elapsed = Math.floor((Date.now() - new Date(n.timerData.startedAt).getTime()) / 1000);
+      n.timerData.totalSeconds += elapsed;
+      n.timerData.isRunning = false;
+      n.timerData.startedAt = null;
     }
   });
-  const timer = data.timers.find(tm => tm.id === timerId);
-  if (!timer) return null;
-  timer.isRunning = true;
-  timer.startedAt = now;
+  const node = data.nodes.find(n => n.id === nodeId);
+  if (!node || !node.timerData) return null;
+  node.timerData.isRunning = true;
+  node.timerData.startedAt = now;
   write(data);
-  return timer;
+  return node;
 }
 
-export function stopTimer(timerId: string): KanbanTimer | null {
+export function stopTimer(nodeId: string): BlueprintNode | null {
   const data = read();
-  const timer = data.timers.find(tm => tm.id === timerId);
-  if (!timer || !timer.isRunning || !timer.startedAt) return null;
-  const elapsed = Math.floor((Date.now() - new Date(timer.startedAt).getTime()) / 1000);
-  timer.totalSeconds += elapsed;
-  timer.isRunning = false;
-  timer.startedAt = null;
+  const node = data.nodes.find(n => n.id === nodeId);
+  if (!node || !node.timerData?.isRunning || !node.timerData.startedAt) return null;
+  const elapsed = Math.floor((Date.now() - new Date(node.timerData.startedAt).getTime()) / 1000);
+  node.timerData.totalSeconds += elapsed;
+  node.timerData.isRunning = false;
+  node.timerData.startedAt = null;
   write(data);
-  return timer;
+  return node;
 }
 
-export function toggleTimer(timerId: string): KanbanTimer | null {
-  const tm = getTimerById(timerId);
-  if (!tm) return null;
-  return tm.isRunning ? stopTimer(timerId) : startTimer(timerId);
+export function toggleNodeTimer(nodeId: string): BlueprintNode | null {
+  const node = read().nodes.find(n => n.id === nodeId);
+  if (!node?.timerData) return null;
+  return node.timerData.isRunning ? stopTimer(nodeId) : startTimer(nodeId);
 }
 
-export function getRunningTimer(): KanbanTimer | null {
-  return read().timers.find(tm => tm.isRunning) || null;
-}
-
-export function getDisplayTime(timer: KanbanTimer): number {
-  let total = timer.totalSeconds;
-  if (timer.isRunning && timer.startedAt) {
-    total += Math.floor((Date.now() - new Date(timer.startedAt).getTime()) / 1000);
+export function getDisplayTime(node: BlueprintNode): number {
+  if (!node.timerData) return 0;
+  let total = node.timerData.totalSeconds;
+  if (node.timerData.isRunning && node.timerData.startedAt) {
+    total += Math.floor((Date.now() - new Date(node.timerData.startedAt).getTime()) / 1000);
   }
   return total;
+}
+
+export function getRunningNode(): BlueprintNode | null {
+  return read().nodes.find(n => n.timerData?.isRunning) || null;
 }
