@@ -1,0 +1,8 @@
+node_modules/
+dist/
+release/
+*.exe
+.DS_Store
+.env.local
+.env.*.local
+timer/release-tmp/  
