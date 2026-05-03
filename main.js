@@ -3,15 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 
-// 检查是否在 Electron 环境中运行
-if (typeof electron === 'string') {
-  console.error('ERROR: require("electron") returned a string instead of the Electron API.');
-  console.error('This usually means the script is being run with "node" instead of "electron".');
-  console.error('Electron Path:', electron);
+const { app, BrowserWindow, screen, globalShortcut, session, ipcMain, Menu, Tray, nativeImage, shell } = electron;
+
+// 检查是否在 Electron 环境中运行 (v41+ require('electron') 在 Node 中返回路径)
+if (process.versions && !process.versions.electron) {
+  console.error('ERROR: This script must be run inside Electron, not plain Node.js.');
   process.exit(1);
 }
-
-const { app, BrowserWindow, screen, globalShortcut, session, ipcMain, Menu, Tray, nativeImage, shell } = electron;
 
 let logFilePath = null;
 
